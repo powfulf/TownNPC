@@ -2,7 +2,21 @@
 
 TownNPC is a Paper plugin that adds player-like NPCs which patrol a looped path of waypoints. Each NPC is sent to clients purely through packets. Nothing is spawned on the server, so NPCs are never ticked by the game loop, never saved into world files, and never collide with real entities.
 
-Built for Paper 1.21.11 and Folia 1.21.11. Works on both online and offline-mode servers and is compatible with Geyser.
+## Requirements
+
+- Paper 1.21.11 or Folia 1.21.11
+- Java 21 or newer
+
+## Compatibility
+
+| Platform | Status |
+|---|---|
+| Paper 1.21.11 | Supported and tested |
+| Folia 1.21.11 | Supported and tested, NPCs tick on their own region |
+| Online-mode servers | Supported |
+| Offline-mode servers | Supported. In-server skins require a skin plugin such as SkinsRestorer to provide textures |
+| Geyser / Floodgate | Supported. Bedrock players see the NPC, its skin and its name tag |
+| Other server versions | Not supported. The plugin uses internal server classes and is built for one version |
 
 ## Features
 
