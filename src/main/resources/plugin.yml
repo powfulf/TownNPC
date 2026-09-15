@@ -1,0 +1,16 @@
+name: townnpc
+version: '${version}'
+main: id.gaffa.townnpc.TownNpcPlugin
+api-version: '1.21'
+description: Packet-based walking NPC bots that patrol a configured path.
+author: gaffa
+commands:
+  townnpc:
+    description: Manage TownNPC bots
+    aliases: [tnpc]
+    permission: townnpc.admin
+    permission-message: You do not have permission to use TownNPC.
+permissions:
+  townnpc.admin:
+    description: Manage TownNPC bots
+    default: op

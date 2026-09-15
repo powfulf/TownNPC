@@ -1,0 +1,36 @@
+# TownNPC configuration. Distances in blocks, times in ticks (20 ticks = 1 second).
+
+# Players farther than this from an NPC do not receive its packets.
+view-distance: 48
+# How often (ticks) the plugin re-checks which players can see each NPC.
+viewer-check-interval: 10
+# Simulate movement even when no player can see the NPC. Off saves CPU;
+# the NPC simply stands still until someone comes close, then resumes.
+simulate-without-viewers: false
+
+movement:
+  # Default walking speed in blocks per second (vanilla walk = 4.3, sneak = 1.3).
+  default-speed: 2.5
+  # Speed multiplier while sneaking.
+  sneak-multiplier: 0.3
+  # Height the NPC can climb without jumping (stairs, slabs, carpet).
+  step-height: 0.6
+  # Highest obstacle the NPC will jump onto (vanilla jump reaches ~1.25).
+  max-jump-height: 1.25
+
+look:
+  # Head turns toward the nearest player in front of the NPC.
+  enabled: true
+  radius: 6.0
+  # Field of view in degrees centered on the walking direction.
+  fov: 140
+
+skin:
+  # Timeout for Mojang API requests, in seconds.
+  timeout-seconds: 5
+  # Fetched skins are cached for this many days before being refreshed.
+  cache-days: 7
+
+limits:
+  max-npcs: 100
+  max-waypoints: 500

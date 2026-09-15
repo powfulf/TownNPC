@@ -1,0 +1,135 @@
+# TownNPC
+
+TownNPC is a Paper plugin that adds player-like NPCs which patrol a looped path of waypoints. Each NPC is sent to clients purely through packets. Nothing is spawned on the server, so NPCs are never ticked by the game loop, never saved into world files, and never collide with real entities.
+
+Built for Paper 1.21.11. Works on both online and offline-mode servers and is compatible with Geyser.
+
+## Features
+
+- Looped waypoint paths, one path per NPC, any number of NPCs
+- Straight-line walking with ground snapping: stairs, slabs and carpets are climbed without extra setup
+- Automatic jumping over one-block obstacles and automatic crouching under low ceilings
+- Per-waypoint actions: `jump`, `sneak` until the next waypoint, and `wait` for a number of seconds
+- Head tracking of the nearest player in front of the NPC, toggleable per NPC
+- Skins from any Mojang account or from a player currently online
+- Name tag shown above the NPC, hidden from the tab list
+- Packets are only sent to players within a configurable distance; unseen NPCs are not simulated
+
+## Installation
+
+1. Download `townnpc-<version>.jar` or build it yourself (see below).
+2. Place the jar in your server's `plugins` folder.
+3. Restart the server. The configuration is written to `plugins/townnpc/`.
+
+## Building
+
+Requires JDK 21 or newer. Gradle downloads the Paper dev bundle on the first run.
+
+```bash
+./gradlew build
+```
+
+The jar is written to `build/libs/`.
+
+## Usage
+
+Stand where the NPC should start and create it:
+
+```
+/tnpc create guard
+```
+
+Walk to the next point of the route and add a waypoint. Repeat until the route is complete. The last waypoint connects back to the first one automatically.
+
+```
+/tnpc path guard add
+```
+
+Waypoint options can be combined:
+
+```
+/tnpc path guard add wait 3
+/tnpc path guard add jump
+/tnpc path guard add sneak wait 2
+```
+
+Give the NPC a skin:
+
+```
+/tnpc skin guard mojang Notch
+/tnpc skin guard player Steve
+```
+
+Use `/tnpc path guard show` to preview the route with particles.
+
+### Tips
+
+- Add waypoints while standing on the ground. The NPC follows the terrain under it; the waypoint height is only used as a fallback.
+- NPCs walk in a straight line between waypoints and do not avoid walls. Add more waypoints around corners.
+- Obstacles up to one block high are jumped over. Use stairs, slabs or a `jump` waypoint for anything else.
+- By default an NPC stands still while no player is within `view-distance`. Set `simulate-without-viewers: true` if the route must keep running regardless.
+
+## Commands
+
+All commands require the `townnpc.admin` permission (granted to operators by default). `/tnpc` is an alias of `/townnpc`.
+
+| Command | Description |
+|---|---|
+| `/tnpc create <name> [world x y z]` | Create an NPC at your position, or at the given coordinates |
+| `/tnpc remove <name>` | Delete an NPC |
+| `/tnpc list` | List all NPCs |
+| `/tnpc info <name>` | Show position, skin, path size and current state |
+| `/tnpc tp <name>` | Teleport to an NPC |
+| `/tnpc skin <name> mojang <account>` | Use the skin of a Mojang account |
+| `/tnpc skin <name> player <player>` | Use the skin of an online player |
+| `/tnpc skin <name> clear` | Remove the skin |
+| `/tnpc speed <name> <blocks per second>` | Set the walking speed (0.1 to 10) |
+| `/tnpc look <name> on\|off` | Enable or disable head tracking |
+| `/tnpc pause <name>` / `/tnpc resume <name>` | Stop or continue the patrol |
+| `/tnpc path <name> add [jump] [sneak] [wait <seconds>] [at x y z [yaw]]` | Append a waypoint |
+| `/tnpc path <name> insert <index> [options] [at x y z [yaw]]` | Insert a waypoint before the given index |
+| `/tnpc path <name> set <index> jump\|sneak <true\|false>` | Change a waypoint flag |
+| `/tnpc path <name> set <index> wait <seconds>` | Change the wait time of a waypoint |
+| `/tnpc path <name> move <index> [at x y z]` | Move a waypoint to your position |
+| `/tnpc path <name> remove <index>` | Delete a waypoint |
+| `/tnpc path <name> list` | List waypoints with their index and options |
+| `/tnpc path <name> clear` | Delete every waypoint except the first |
+| `/tnpc path <name> show` | Show the route with particles for 15 seconds |
+| `/tnpc reload` | Reload `config.yml` and `npcs.yml` |
+
+## Configuration
+
+`plugins/townnpc/config.yml`
+
+| Key | Default | Description |
+|---|---|---|
+| `view-distance` | `48` | Players farther away than this do not receive NPC packets |
+| `viewer-check-interval` | `10` | Ticks between checks of which players can see each NPC |
+| `simulate-without-viewers` | `false` | Keep NPCs moving while nobody is watching |
+| `movement.default-speed` | `2.5` | Walking speed in blocks per second for new NPCs |
+| `movement.sneak-multiplier` | `0.3` | Speed multiplier while sneaking |
+| `movement.step-height` | `0.6` | Height an NPC climbs without jumping |
+| `movement.max-jump-height` | `1.25` | Highest obstacle an NPC will jump onto |
+| `look.enabled` | `true` | Global switch for head tracking |
+| `look.radius` | `6.0` | Distance in blocks at which players are tracked |
+| `look.fov` | `140` | Field of view in degrees, centered on the walking direction |
+| `skin.timeout-seconds` | `5` | Timeout for Mojang API requests |
+| `skin.cache-days` | `7` | How long fetched skins are cached |
+| `limits.max-npcs` | `100` | Maximum number of NPCs |
+| `limits.max-waypoints` | `500` | Maximum waypoints per NPC |
+
+NPC definitions are stored in `plugins/townnpc/npcs.yml`. The file can be edited by hand; run `/tnpc reload` afterwards.
+
+## Performance
+
+A single task ticks every NPC. Each moving NPC reads about a dozen blocks per tick, only from chunks that are already loaded, and sends one relative movement packet per viewer. Head rotation and pose packets are sent only when they change. NPCs without viewers or in unloaded chunks are skipped entirely.
+
+In a local test, 60 NPCs walking at the same time added roughly 0.5 ms per server tick.
+
+## Security notes
+
+- The plugin never executes commands on behalf of players, and clicking an NPC has no effect.
+- NPC names and Mojang account names are validated against `[A-Za-z0-9_]{1,16}` before use.
+- Skin lookups only contact `api.mojang.com` and `sessionserver.mojang.com` over HTTPS, with a timeout, no redirects and a response size limit. Textures without a valid signature are rejected.
+- Every value read from `config.yml` and `npcs.yml` is clamped to a safe range. Invalid entries are skipped with a warning instead of failing the plugin.
+- Network requests run off the main thread; results are applied on the main thread only while the plugin is enabled.
