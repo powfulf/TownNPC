@@ -99,7 +99,7 @@ public final class SkinService {
 
     private void runSync(Runnable task) {
         if (plugin.isEnabled()) {
-            Bukkit.getScheduler().runTask(plugin, task);
+            Bukkit.getGlobalRegionScheduler().execute(plugin, task);
         }
     }
 

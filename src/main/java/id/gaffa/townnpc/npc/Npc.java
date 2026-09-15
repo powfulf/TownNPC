@@ -3,6 +3,7 @@ package id.gaffa.townnpc.npc;
 import id.gaffa.townnpc.nms.PacketBridge;
 import id.gaffa.townnpc.path.Waypoint;
 import id.gaffa.townnpc.skin.SkinData;
+import net.minecraft.network.protocol.Packet;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
@@ -19,12 +20,17 @@ public final class Npc {
     private final UUID uuid;
     private final int entityId = PacketBridge.nextEntityId();
 
-    private String worldName;
-    private double speed;
-    private boolean lookAtPlayers = true;
-    private boolean paused;
-    private String skinSource = "";
-    private SkinData skin;
+    private volatile String worldName;
+    private volatile double speed;
+    private volatile boolean lookAtPlayers = true;
+    private volatile boolean paused;
+    private volatile String skinSource = "";
+    private volatile SkinData skin;
+    volatile boolean removed;
+    volatile int generation;
+    int idleTicks;
+    long tick;
+    final List<Packet<?>> packetBuffer = new ArrayList<>(4);
     private final List<Waypoint> waypoints = new ArrayList<>();
 
     double x;

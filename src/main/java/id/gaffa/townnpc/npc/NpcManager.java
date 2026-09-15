@@ -20,26 +20,29 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
 public final class NpcManager {
-    private static final int READY_DELAY_TICKS = 20;
+    private static final long READY_DELAY_MILLIS = 1000L;
+    private static final int IDLE_TICKS_BEFORE_SLEEP = 100;
+    private static final long AUTOSAVE_INTERVAL_TICKS = 100L;
     private static final long MAX_RELATIVE_DELTA = Short.MAX_VALUE;
 
     private final Plugin plugin;
     private final File file;
-    private final Map<String, Npc> npcs = new LinkedHashMap<>();
-    private final Map<UUID, Long> readyAt = new java.util.HashMap<>();
-    private final List<Packet<?>> packetBuffer = new ArrayList<>(4);
-    private Settings settings;
-    private Mover mover;
-    private long tick;
-    private boolean dirty;
+    private final Map<String, Npc> npcs = new ConcurrentSkipListMap<>();
+    private final Map<UUID, Long> readyAt = new ConcurrentHashMap<>();
+    private final AtomicInteger generation = new AtomicInteger();
+    private volatile Settings settings;
+    private volatile Mover mover;
+    private volatile boolean dirty;
     private long saveSequence;
     private long writtenSequence;
 
@@ -76,26 +79,45 @@ public final class NpcManager {
         npc.resetTo(0);
         npcs.put(name.toLowerCase(Locale.ROOT), npc);
         markDirty();
+        start(npc);
         return npc;
     }
 
     public void remove(Npc npc) {
-        despawnForAll(npc);
-        npcs.remove(npc.name().toLowerCase(Locale.ROOT));
+        synchronized (npc) {
+            npc.removed = true;
+            despawnForAll(npc);
+        }
+        npcs.remove(npc.name().toLowerCase(Locale.ROOT), npc);
+        markDirty();
+    }
+
+    public void edit(Npc npc, Runnable change) {
+        synchronized (npc) {
+            change.run();
+        }
         markDirty();
     }
 
     public void refresh(Npc npc) {
-        List<Player> viewers = new ArrayList<>(npc.viewers);
-        despawnForAll(npc);
-        for (Player viewer : viewers) {
-            spawnFor(npc, viewer);
+        synchronized (npc) {
+            List<Player> viewers = new ArrayList<>(npc.viewers);
+            despawnForAll(npc);
+            for (Player viewer : viewers) {
+                spawnFor(npc, viewer);
+            }
         }
     }
 
     public void restart(Npc npc) {
-        npc.resetTo(0);
-        refresh(npc);
+        synchronized (npc) {
+            npc.resetTo(0);
+            List<Player> viewers = new ArrayList<>(npc.viewers);
+            despawnForAll(npc);
+            for (Player viewer : viewers) {
+                spawnFor(npc, viewer);
+            }
+        }
         markDirty();
     }
 
@@ -103,45 +125,112 @@ public final class NpcManager {
         dirty = true;
     }
 
-    public void tick() {
-        tick++;
-        boolean checkViewers = tick % settings.viewerCheckInterval() == 0;
-        for (Npc npc : npcs.values()) {
-            try {
-                tickNpc(npc, checkViewers);
-            } catch (RuntimeException e) {
-                plugin.getLogger().log(Level.WARNING, "Error ticking NPC " + npc.name(), e);
+    public void startAutosave() {
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, task -> {
+            if (dirty) {
+                save(true);
             }
+        }, AUTOSAVE_INTERVAL_TICKS, AUTOSAVE_INTERVAL_TICKS);
+    }
+
+    private void start(Npc npc) {
+        npc.generation = generation.get();
+        npc.idleTicks = 0;
+        scheduleRegion(npc, 1);
+    }
+
+    private boolean alive(Npc npc) {
+        return plugin.isEnabled() && !npc.removed && npc.generation == generation.get();
+    }
+
+    private void scheduleRegion(Npc npc, long delay) {
+        World world = Bukkit.getWorld(npc.worldName());
+        if (world == null) {
+            scheduleGlobal(npc, AUTOSAVE_INTERVAL_TICKS);
+            return;
         }
-        if (dirty && tick % 100 == 0) {
-            save(true);
+        int chunkX;
+        int chunkZ;
+        synchronized (npc) {
+            chunkX = ((int) Math.floor(npc.x)) >> 4;
+            chunkZ = ((int) Math.floor(npc.z)) >> 4;
+        }
+        Bukkit.getRegionScheduler().runDelayed(plugin, world, chunkX, chunkZ, task -> regionTick(npc), delay);
+    }
+
+    private void scheduleGlobal(Npc npc, long delay) {
+        Bukkit.getGlobalRegionScheduler().runDelayed(plugin, task -> globalPoll(npc), delay);
+    }
+
+    private void regionTick(Npc npc) {
+        if (!alive(npc)) {
+            return;
+        }
+        boolean idle;
+        try {
+            idle = tickNpc(npc);
+        } catch (RuntimeException e) {
+            plugin.getLogger().log(Level.WARNING, "Error ticking NPC " + npc.name(), e);
+            idle = true;
+        }
+        if (idle && !settings.simulateWithoutViewers() && ++npc.idleTicks >= IDLE_TICKS_BEFORE_SLEEP) {
+            npc.idleTicks = 0;
+            scheduleGlobal(npc, settings.viewerCheckInterval());
+        } else {
+            if (!idle) {
+                npc.idleTicks = 0;
+            }
+            scheduleRegion(npc, 1);
         }
     }
 
-    private void tickNpc(Npc npc, boolean checkViewers) {
+    private void globalPoll(Npc npc) {
+        if (!alive(npc)) {
+            return;
+        }
         World world = Bukkit.getWorld(npc.worldName());
-        if (world == null) {
-            if (!npc.viewers.isEmpty()) {
+        boolean hasViewers = false;
+        synchronized (npc) {
+            if (world == null) {
                 despawnForAll(npc);
+            } else {
+                updateViewers(npc, world);
+                hasViewers = !npc.viewers.isEmpty();
             }
-            return;
         }
-        if (checkViewers) {
-            updateViewers(npc, world);
+        if (hasViewers) {
+            scheduleRegion(npc, 1);
+        } else {
+            scheduleGlobal(npc, settings.viewerCheckInterval());
         }
-        if (npc.viewers.isEmpty() && !settings.simulateWithoutViewers()) {
-            return;
-        }
-        if (!npc.paused()) {
-            mover.tick(npc, world);
-        }
-        if (!npc.lookAtPlayers() || !settings.lookEnabled()) {
-            npc.headYaw = npc.yaw;
-        } else if ((tick & 1) == 0) {
-            updateLook(npc);
-        }
-        if (!npc.viewers.isEmpty()) {
-            sendMovement(npc);
+    }
+
+    private boolean tickNpc(Npc npc) {
+        synchronized (npc) {
+            World world = Bukkit.getWorld(npc.worldName());
+            if (world == null) {
+                despawnForAll(npc);
+                return true;
+            }
+            npc.tick++;
+            if (npc.tick % settings.viewerCheckInterval() == 0) {
+                updateViewers(npc, world);
+            }
+            if (npc.viewers.isEmpty() && !settings.simulateWithoutViewers()) {
+                return true;
+            }
+            if (!npc.paused()) {
+                mover.tick(npc, world);
+            }
+            if (!npc.lookAtPlayers() || !settings.lookEnabled()) {
+                npc.headYaw = npc.yaw;
+            } else if ((npc.tick & 1) == 0) {
+                updateLook(npc);
+            }
+            if (!npc.viewers.isEmpty()) {
+                sendMovement(npc);
+            }
+            return npc.viewers.isEmpty();
         }
     }
 
@@ -158,8 +247,8 @@ public final class NpcManager {
                 }
             }
         }
-        for (Player player : world.getPlayers()) {
-            if (npc.viewers.contains(player) || !isReady(player)) {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getWorld() != world || npc.viewers.contains(player) || !isReady(player)) {
                 continue;
             }
             if (distanceSquared(npc, player) <= maxDistSq) {
@@ -206,7 +295,7 @@ public final class NpcManager {
 
     private void sendMovement(Npc npc) {
         boolean sneaking = npc.sneakSegment || npc.lowCeiling;
-        List<Packet<?>> packets = packetBuffer;
+        List<Packet<?>> packets = npc.packetBuffer;
         packets.clear();
 
         if (sneaking != npc.sneakingShown) {
@@ -274,7 +363,6 @@ public final class NpcManager {
                 skin == null ? null : skin.value(), skin == null ? null : skin.signature());
         List<Packet<?>> packets = new ArrayList<>(4);
         packets.add(PacketBridge.playerInfoAdd(profile));
-
         packets.add(PacketBridge.addPlayer(npc.entityId(), npc.uuid(),
                 npc.sentX / 4096.0, npc.sentY / 4096.0, npc.sentZ / 4096.0, npc.yaw, npc.pitch, npc.headYaw));
         packets.add(PacketBridge.entityData(npc.entityId(), npc.sneakingShown));
@@ -287,7 +375,7 @@ public final class NpcManager {
         return List.of(PacketBridge.removeEntity(npc.entityId()), PacketBridge.playerInfoRemove(npc.uuid()));
     }
 
-    public void despawnForAll(Npc npc) {
+    private void despawnForAll(Npc npc) {
         if (npc.viewers.isEmpty()) {
             return;
         }
@@ -302,19 +390,23 @@ public final class NpcManager {
 
     public void despawnAll() {
         for (Npc npc : npcs.values()) {
-            despawnForAll(npc);
+            synchronized (npc) {
+                despawnForAll(npc);
+            }
         }
     }
 
     public void onJoin(Player player) {
-        readyAt.put(player.getUniqueId(), tick + READY_DELAY_TICKS);
+        readyAt.put(player.getUniqueId(), System.currentTimeMillis() + READY_DELAY_MILLIS);
     }
 
     public void onClientReset(Player player) {
         List<Packet<?>> infoRemovals = new ArrayList<>();
         for (Npc npc : npcs.values()) {
-            if (npc.viewers.remove(player)) {
-                infoRemovals.add(PacketBridge.playerInfoRemove(npc.uuid()));
+            synchronized (npc) {
+                if (npc.viewers.remove(player)) {
+                    infoRemovals.add(PacketBridge.playerInfoRemove(npc.uuid()));
+                }
             }
         }
         if (!infoRemovals.isEmpty() && player.isOnline()) {
@@ -325,16 +417,18 @@ public final class NpcManager {
     public void onQuit(Player player) {
         readyAt.remove(player.getUniqueId());
         for (Npc npc : npcs.values()) {
-            npc.viewers.remove(player);
-            if (npc.lookTarget == player) {
-                npc.lookTarget = null;
+            synchronized (npc) {
+                npc.viewers.remove(player);
+                if (npc.lookTarget == player) {
+                    npc.lookTarget = null;
+                }
             }
         }
     }
 
     private boolean isReady(Player player) {
         Long ready = readyAt.get(player.getUniqueId());
-        return ready != null && tick >= ready && PacketBridge.isConnected(player);
+        return ready != null && System.currentTimeMillis() >= ready && PacketBridge.isConnected(player);
     }
 
     private static double distanceSquared(Npc npc, Player player) {
@@ -346,6 +440,7 @@ public final class NpcManager {
     }
 
     public void load() {
+        generation.incrementAndGet();
         despawnAll();
         npcs.clear();
         if (!file.exists()) {
@@ -365,6 +460,7 @@ public final class NpcManager {
                 Npc npc = loadNpc(key, section);
                 if (npc != null) {
                     npcs.put(npc.name().toLowerCase(Locale.ROOT), npc);
+                    start(npc);
                 }
             } catch (RuntimeException e) {
                 plugin.getLogger().log(Level.WARNING, "Skipping invalid NPC entry '" + key + "'", e);
@@ -431,27 +527,32 @@ public final class NpcManager {
         dirty = false;
         YamlConfiguration yaml = new YamlConfiguration();
         for (Npc npc : npcs.values()) {
-            ConfigurationSection section = yaml.createSection("npcs." + npc.name());
-            section.set("name", npc.name());
-            section.set("uuid", npc.uuid().toString());
-            section.set("world", npc.worldName());
-            section.set("speed", npc.speed());
-            section.set("look-at-players", npc.lookAtPlayers());
-            section.set("paused", npc.paused());
-            if (npc.skin() != null) {
-                section.set("skin.source", npc.skinSource());
-                section.set("skin.value", npc.skin().value());
-                section.set("skin.signature", npc.skin().signature());
+            synchronized (npc) {
+                ConfigurationSection section = yaml.createSection("npcs." + npc.name());
+                section.set("name", npc.name());
+                section.set("uuid", npc.uuid().toString());
+                section.set("world", npc.worldName());
+                section.set("speed", npc.speed());
+                section.set("look-at-players", npc.lookAtPlayers());
+                section.set("paused", npc.paused());
+                if (npc.skin() != null) {
+                    section.set("skin.source", npc.skinSource());
+                    section.set("skin.value", npc.skin().value());
+                    section.set("skin.signature", npc.skin().signature());
+                }
+                List<Map<String, Object>> waypoints = new ArrayList<>(npc.waypoints().size());
+                for (Waypoint waypoint : npc.waypoints()) {
+                    waypoints.add(waypoint.serialize());
+                }
+                section.set("waypoints", waypoints);
             }
-            List<Map<String, Object>> waypoints = new ArrayList<>(npc.waypoints().size());
-            for (Waypoint waypoint : npc.waypoints()) {
-                waypoints.add(waypoint.serialize());
-            }
-            section.set("waypoints", waypoints);
         }
-        long sequence = ++saveSequence;
+        long sequence;
+        synchronized (file) {
+            sequence = ++saveSequence;
+        }
         if (async && plugin.isEnabled()) {
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> write(yaml, sequence));
+            Bukkit.getAsyncScheduler().runNow(plugin, task -> write(yaml, sequence));
         } else {
             write(yaml, sequence);
         }

@@ -17,7 +17,6 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -164,9 +163,8 @@ public final class TownNpcCommand implements TabExecutor {
         }
         switch (args[2].toLowerCase(Locale.ROOT)) {
             case "clear" -> {
-                npc.setSkin("", null);
+                npcs.edit(npc, () -> npc.setSkin("", null));
                 npcs.refresh(npc);
-                npcs.markDirty();
                 success(sender, "Skin cleared for " + npc.name() + ".");
             }
             case "player" -> {
@@ -217,9 +215,8 @@ public final class TownNpcCommand implements TabExecutor {
     }
 
     private void applySkin(CommandSender sender, Npc npc, String source, SkinData skin) {
-        npc.setSkin(source, skin);
+        npcs.edit(npc, () -> npc.setSkin(source, skin));
         npcs.refresh(npc);
-        npcs.markDirty();
         success(sender, "Skin of " + npc.name() + " set from " + source + ".");
     }
 
@@ -233,8 +230,7 @@ public final class TownNpcCommand implements TabExecutor {
             error(sender, "Speed must be between " + Settings.MIN_SPEED + " and " + Settings.MAX_SPEED + ".");
             return;
         }
-        npc.setSpeed(value);
-        npcs.markDirty();
+        npcs.edit(npc, () -> npc.setSpeed(value));
         success(sender, "Speed of " + npc.name() + " set to " + value + " blocks/s.");
     }
 
@@ -248,8 +244,7 @@ public final class TownNpcCommand implements TabExecutor {
             error(sender, "Usage: look <name> on|off");
             return;
         }
-        npc.setLookAtPlayers(value);
-        npcs.markDirty();
+        npcs.edit(npc, () -> npc.setLookAtPlayers(value));
         success(sender, npc.name() + (value ? " now looks at nearby players." : " no longer looks at players."));
     }
 
@@ -258,8 +253,7 @@ public final class TownNpcCommand implements TabExecutor {
         if (npc == null) {
             return;
         }
-        npc.setPaused(paused);
-        npcs.markDirty();
+        npcs.edit(npc, () -> npc.setPaused(paused));
         success(sender, npc.name() + (paused ? " paused." : " resumed."));
     }
 
@@ -284,7 +278,7 @@ public final class TownNpcCommand implements TabExecutor {
                 if (waypoint == null) {
                     return;
                 }
-                path.add(waypoint);
+                npcs.edit(npc, () -> path.add(waypoint));
                 npcs.restart(npc);
                 success(sender, "Added waypoint #" + (path.size() - 1) + " to " + npc.name() + describe(waypoint));
             }
@@ -298,7 +292,7 @@ public final class TownNpcCommand implements TabExecutor {
                 if (waypoint == null) {
                     return;
                 }
-                path.add(index, waypoint);
+                npcs.edit(npc, () -> path.add(index, waypoint));
                 npcs.restart(npc);
                 success(sender, "Inserted waypoint #" + index + " into " + npc.name() + describe(waypoint));
             }
@@ -311,8 +305,7 @@ public final class TownNpcCommand implements TabExecutor {
                 if (updated == null) {
                     return;
                 }
-                path.set(index, updated);
-                npcs.markDirty();
+                npcs.edit(npc, () -> path.set(index, updated));
                 success(sender, "Waypoint #" + index + " updated" + describe(updated));
             }
             case "move" -> {
@@ -324,7 +317,7 @@ public final class TownNpcCommand implements TabExecutor {
                 if (location == null) {
                     return;
                 }
-                path.set(index, path.get(index).withPosition(location));
+                npcs.edit(npc, () -> path.set(index, path.get(index).withPosition(location)));
                 npcs.restart(npc);
                 success(sender, "Waypoint #" + index + " moved to " + fmt(location.getX()) + ", "
                         + fmt(location.getY()) + ", " + fmt(location.getZ()) + ".");
@@ -338,7 +331,7 @@ public final class TownNpcCommand implements TabExecutor {
                     error(sender, "An NPC needs at least one waypoint. Use /" + label + " remove " + npc.name() + " instead.");
                     return;
                 }
-                path.remove((int) index);
+                npcs.edit(npc, () -> path.remove((int) index));
                 npcs.restart(npc);
                 success(sender, "Removed waypoint #" + index + " from " + npc.name() + ".");
             }
@@ -350,9 +343,11 @@ public final class TownNpcCommand implements TabExecutor {
                 }
             }
             case "clear" -> {
-                Waypoint first = path.get(0);
-                path.clear();
-                path.add(first);
+                npcs.edit(npc, () -> {
+                    Waypoint first = path.get(0);
+                    path.clear();
+                    path.add(first);
+                });
                 npcs.restart(npc);
                 success(sender, "Path of " + npc.name() + " cleared; waypoint #0 kept.");
             }
@@ -441,23 +436,19 @@ public final class TownNpcCommand implements TabExecutor {
         }
         Particle.DustOptions segment = new Particle.DustOptions(Color.AQUA, 0.8f);
         Particle.DustOptions node = new Particle.DustOptions(Color.YELLOW, 1.5f);
-        new BukkitRunnable() {
-            int remaining = SHOW_SECONDS * 2;
-
-            @Override
-            public void run() {
-                if (remaining-- <= 0 || !player.isOnline() || player.getWorld() != world) {
-                    cancel();
-                    return;
-                }
-                for (Location point : points) {
-                    player.spawnParticle(Particle.DUST, point, 1, 0, 0, 0, 0, segment);
-                }
-                for (Waypoint wp : path) {
-                    player.spawnParticle(Particle.DUST, wp.x(), wp.y() + 1.0, wp.z(), 3, 0.1, 0.3, 0.1, 0, node);
-                }
+        int[] remaining = {SHOW_SECONDS * 2};
+        player.getScheduler().runAtFixedRate(plugin, task -> {
+            if (remaining[0]-- <= 0 || !player.isOnline() || player.getWorld() != world) {
+                task.cancel();
+                return;
             }
-        }.runTaskTimer(plugin, 0L, 10L);
+            for (Location point : points) {
+                player.spawnParticle(Particle.DUST, point, 1, 0, 0, 0, 0, segment);
+            }
+            for (Waypoint wp : path) {
+                player.spawnParticle(Particle.DUST, wp.x(), wp.y() + 1.0, wp.z(), 3, 0.1, 0.3, 0.1, 0, node);
+            }
+        }, null, 1L, 10L);
     }
 
     private Player requirePlayer(CommandSender sender) {

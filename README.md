@@ -2,7 +2,7 @@
 
 TownNPC is a Paper plugin that adds player-like NPCs which patrol a looped path of waypoints. Each NPC is sent to clients purely through packets. Nothing is spawned on the server, so NPCs are never ticked by the game loop, never saved into world files, and never collide with real entities.
 
-Built for Paper 1.21.11. Works on both online and offline-mode servers and is compatible with Geyser.
+Built for Paper 1.21.11 and Folia 1.21.11. Works on both online and offline-mode servers and is compatible with Geyser.
 
 ## Features
 
@@ -14,6 +14,7 @@ Built for Paper 1.21.11. Works on both online and offline-mode servers and is co
 - Skins from any Mojang account or from a player currently online
 - Name tag shown above the NPC, hidden from the tab list
 - Packets are only sent to players within a configurable distance; unseen NPCs are not simulated
+- Native Folia support: each NPC ticks on the region that owns its chunk
 
 ## Installation
 
@@ -105,7 +106,7 @@ All commands require the `townnpc.admin` permission (granted to operators by def
 |---|---|---|
 | `view-distance` | `48` | Players farther away than this do not receive NPC packets |
 | `viewer-check-interval` | `10` | Ticks between checks of which players can see each NPC |
-| `simulate-without-viewers` | `false` | Keep NPCs moving while nobody is watching |
+| `simulate-without-viewers` | `false` | Keep NPCs moving while nobody is watching. On Folia this also keeps the NPC's chunk loaded |
 | `movement.default-speed` | `2.5` | Walking speed in blocks per second for new NPCs |
 | `movement.sneak-multiplier` | `0.3` | Speed multiplier while sneaking |
 | `movement.step-height` | `0.6` | Height an NPC climbs without jumping |
@@ -125,6 +126,8 @@ NPC definitions are stored in `plugins/townnpc/npcs.yml`. The file can be edited
 A single task ticks every NPC. Each moving NPC reads about a dozen blocks per tick, only from chunks that are already loaded, and sends one relative movement packet per viewer. Head rotation and pose packets are sent only when they change. NPCs without viewers or in unloaded chunks are skipped entirely.
 
 In a local test, 60 NPCs walking at the same time added roughly 0.5 ms per server tick.
+
+On Folia, every NPC schedules its own tick on the region that owns its current chunk, so NPCs in different regions are processed in parallel and never touch a chunk from the wrong thread. An NPC with no viewers drops to a light global check every `viewer-check-interval` ticks after five seconds and resumes region ticking as soon as a player comes within `view-distance`.
 
 ## Security notes
 

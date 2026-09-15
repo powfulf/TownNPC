@@ -32,7 +32,7 @@ public final class TownNpcPlugin extends JavaPlugin {
             command.setExecutor(executor);
             command.setTabCompleter(executor);
         }
-        Bukkit.getScheduler().runTaskTimer(this, npcs::tick, 1L, 1L);
+        npcs.startAutosave();
     }
 
     @Override

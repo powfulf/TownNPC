@@ -25,8 +25,6 @@ final class Mover {
         this.settings = settings;
     }
 
-    private double surface;
-
     boolean tick(Npc npc, World world) {
         List<Waypoint> path = npc.waypoints();
         if (path.size() < 2) {
@@ -84,7 +82,8 @@ final class Mover {
             if (npc.velocityY < -MAX_FALL_PER_TICK) {
                 npc.velocityY = -MAX_FALL_PER_TICK;
             }
-            if (falling && scanSurface(world, nx, nz, npc.y + EPSILON, ny)) {
+            double surface = falling ? scanSurface(world, nx, nz, npc.y + EPSILON, ny) : Double.NaN;
+            if (!Double.isNaN(surface)) {
                 ny = surface;
                 npc.airborne = false;
                 npc.velocityY = 0;
@@ -94,8 +93,8 @@ final class Mover {
                 return true;
             }
         } else {
-            boolean found = scanSurface(world, nx, nz, npc.y + settings.maxJumpHeight(), npc.y - settings.stepHeight());
-            if (!found) {
+            double surface = scanSurface(world, nx, nz, npc.y + settings.maxJumpHeight(), npc.y - settings.stepHeight());
+            if (Double.isNaN(surface)) {
                 npc.airborne = true;
                 npc.velocityY = 0;
                 ny = npc.y;
@@ -148,7 +147,7 @@ final class Mover {
         npc.nextWaypoint = (npc.nextWaypoint + 1) % pathSize;
     }
 
-    private boolean scanSurface(World world, double x, double z, double top, double bottom) {
+    private double scanSurface(World world, double x, double z, double top, double bottom) {
         int minBx = floor(x - FOOTPRINT);
         int maxBx = floor(x + FOOTPRINT);
         int minBz = floor(z - FOOTPRINT);
@@ -179,8 +178,7 @@ final class Mover {
                 break;
             }
         }
-        surface = best;
-        return !Double.isNaN(best);
+        return best;
     }
 
     private boolean hasLowCeiling(World world, double x, double y, double z) {
