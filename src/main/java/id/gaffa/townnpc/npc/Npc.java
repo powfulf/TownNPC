@@ -34,6 +34,7 @@ public final class Npc {
     volatile boolean removed;
     volatile int generation;
     int idleTicks;
+    int blockedTicks;
     long tick;
     final List<Packet<?>> packetBuffer = new ArrayList<>(4);
     private final List<Waypoint> waypoints = new ArrayList<>();
@@ -203,6 +204,10 @@ public final class Npc {
         routeIndex = 0;
         routeCache.clear();
         nextWaypoint = waypoints.size() > 1 ? (index + 1) % waypoints.size() : 0;
+    }
+
+    public String routeState() {
+        return route == null ? "none" : routeIndex + "/" + route.size();
     }
 
     public List<double[]> cachedRoute(int segment) {

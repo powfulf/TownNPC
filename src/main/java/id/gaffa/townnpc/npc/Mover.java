@@ -11,8 +11,13 @@ import java.util.List;
 
 final class Mover {
     private static final double HALF_WIDTH = 0.3;
-    private static final double FOOTPRINT = HALF_WIDTH - 0.01;
+    private static final double BODY_RADIUS = HALF_WIDTH - 0.01;
+    private static final double GROUND_RADIUS = 0.15;
+    private static final double AIR_STEP = 0.09;
+    private static final double AIR_CLEARANCE = 0.3;
+    private static final int BLOCKED_REPLAN_TICKS = 100;
     private static final double STANDING_HEIGHT = 1.8;
+    private static final double SNEAK_HEIGHT = 1.5;
     private static final double JUMP_VELOCITY = 0.42;
     private static final double GRAVITY = 0.08;
     private static final double DRAG = 0.98;
@@ -58,6 +63,9 @@ final class Mover {
         if (npc.sneakSegment || npc.lowCeiling) {
             step *= settings.sneakMultiplier();
         }
+        if (npc.airborne) {
+            step = Math.min(step, AIR_STEP);
+        }
 
         double nx;
         double nz;
@@ -82,6 +90,30 @@ final class Mover {
             npc.pendingJump = false;
             npc.airborne = true;
             npc.velocityY = JUMP_VELOCITY;
+        }
+
+        double clearance = npc.airborne ? AIR_CLEARANCE : settings.maxJumpHeight();
+        if ((nx != npc.x || nz != npc.z) && isBlocked(world, nx, nz, npc.y, clearance)) {
+            if (distance <= HALF_WIDTH + step) {
+                nx = npc.x;
+                nz = npc.z;
+                arrived = true;
+            } else if (nx != npc.x && !isBlocked(world, nx, npc.z, npc.y, clearance)) {
+                nz = npc.z;
+            } else if (nz != npc.z && !isBlocked(world, npc.x, nz, npc.y, clearance)) {
+                nx = npc.x;
+            } else {
+                nx = npc.x;
+                nz = npc.z;
+                if (!npc.airborne && ++npc.blockedTicks >= BLOCKED_REPLAN_TICKS) {
+                    npc.blockedTicks = 0;
+                    npc.routeCache.remove(npc.nextWaypoint);
+                    npc.route = null;
+                    npc.routeIndex = 0;
+                }
+            }
+        } else if (!npc.airborne) {
+            npc.blockedTicks = 0;
         }
 
         double ny;
@@ -191,11 +223,43 @@ final class Mover {
         npc.nextWaypoint = (npc.nextWaypoint + 1) % pathSize;
     }
 
+    private boolean isBlocked(World world, double x, double z, double y, double clearance) {
+        int minBx = floor(x - BODY_RADIUS);
+        int maxBx = floor(x + BODY_RADIUS);
+        int minBz = floor(z - BODY_RADIUS);
+        int maxBz = floor(z + BODY_RADIUS);
+        double bodyTop = y + SNEAK_HEIGHT;
+        double passTop = y + clearance;
+        int minBy = Math.max(world.getMinHeight(), floor(y));
+        int maxBy = Math.min(world.getMaxHeight() - 1, floor(bodyTop));
+        for (int by = minBy; by <= maxBy; by++) {
+            for (int bx = minBx; bx <= maxBx; bx++) {
+                for (int bz = minBz; bz <= maxBz; bz++) {
+                    Block block = world.getBlockAt(bx, by, bz);
+                    if (block.isPassable()) {
+                        continue;
+                    }
+                    for (BoundingBox box : block.getCollisionShape().getBoundingBoxes()) {
+                        if (!overlaps(box, bx, bz, x, z, BODY_RADIUS)) {
+                            continue;
+                        }
+                        double boxBottom = by + box.getMinY();
+                        double boxTop = by + box.getMaxY();
+                        if (boxBottom < bodyTop - EPSILON && boxTop > passTop + EPSILON) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private double scanSurface(World world, double x, double z, double top, double bottom) {
-        int minBx = floor(x - FOOTPRINT);
-        int maxBx = floor(x + FOOTPRINT);
-        int minBz = floor(z - FOOTPRINT);
-        int maxBz = floor(z + FOOTPRINT);
+        int minBx = floor(x - GROUND_RADIUS);
+        int maxBx = floor(x + GROUND_RADIUS);
+        int minBz = floor(z - GROUND_RADIUS);
+        int maxBz = floor(z + GROUND_RADIUS);
         int minBy = Math.max(world.getMinHeight(), floor(bottom));
         int maxBy = Math.min(world.getMaxHeight() - 1, floor(top));
         double best = Double.NaN;
@@ -207,7 +271,7 @@ final class Mover {
                         continue;
                     }
                     for (BoundingBox box : block.getCollisionShape().getBoundingBoxes()) {
-                        if (!overlapsFootprint(box, bx, bz, x, z)) {
+                        if (!overlaps(box, bx, bz, x, z, GROUND_RADIUS)) {
                             continue;
                         }
                         double boxTop = by + box.getMaxY();
@@ -226,10 +290,10 @@ final class Mover {
     }
 
     private boolean hasLowCeiling(World world, double x, double y, double z) {
-        int minBx = floor(x - FOOTPRINT);
-        int maxBx = floor(x + FOOTPRINT);
-        int minBz = floor(z - FOOTPRINT);
-        int maxBz = floor(z + FOOTPRINT);
+        int minBx = floor(x - BODY_RADIUS);
+        int maxBx = floor(x + BODY_RADIUS);
+        int minBz = floor(z - BODY_RADIUS);
+        int maxBz = floor(z + BODY_RADIUS);
         double headBottom = y + 1.0;
         double headTop = y + STANDING_HEIGHT;
         int minBy = Math.max(world.getMinHeight(), floor(headBottom));
@@ -242,7 +306,7 @@ final class Mover {
                         continue;
                     }
                     for (BoundingBox box : block.getCollisionShape().getBoundingBoxes()) {
-                        if (!overlapsFootprint(box, bx, bz, x, z)) {
+                        if (!overlaps(box, bx, bz, x, z, BODY_RADIUS)) {
                             continue;
                         }
                         double boxBottom = by + box.getMinY();
@@ -257,9 +321,9 @@ final class Mover {
         return false;
     }
 
-    private static boolean overlapsFootprint(BoundingBox box, int bx, int bz, double x, double z) {
-        return bx + box.getMinX() < x + FOOTPRINT && bx + box.getMaxX() > x - FOOTPRINT
-                && bz + box.getMinZ() < z + FOOTPRINT && bz + box.getMaxZ() > z - FOOTPRINT;
+    private static boolean overlaps(BoundingBox box, int bx, int bz, double x, double z, double radius) {
+        return bx + box.getMinX() < x + radius && bx + box.getMaxX() > x - radius
+                && bz + box.getMinZ() < z + radius && bz + box.getMaxZ() > z - radius;
     }
 
     private static boolean isLoaded(World world, double x, double z) {

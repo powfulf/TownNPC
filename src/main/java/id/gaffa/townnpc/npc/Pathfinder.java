@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 
-final class Pathfinder {
+public final class Pathfinder {
     private static final double MAX_PARTIAL_FLOOR = 0.75;
     private static final double SNEAK_HEIGHT = 1.5;
     private static final double STAND_HEIGHT = 1.8;
@@ -50,12 +50,12 @@ final class Pathfinder {
         }
     }
 
-    Pathfinder(Settings settings, World world) {
+    public Pathfinder(Settings settings, World world) {
         this.settings = settings;
         this.world = world;
     }
 
-    List<double[]> find(double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
+    public List<double[]> find(double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
         double dx = toX - fromX;
         double dz = toZ - fromZ;
         if (dx * dx + dz * dz > settings.pathMaxDistance() * settings.pathMaxDistance()) {
@@ -96,6 +96,9 @@ final class Pathfinder {
                 if (next == null || next.closed) {
                     continue;
                 }
+                if (diagonal && Math.abs(next.floor - current.floor) > 1.0e-6) {
+                    continue;
+                }
                 double cost = current.g + moveCost(current, next, diagonal);
                 if (cost < next.g) {
                     next.g = cost;
@@ -132,9 +135,27 @@ final class Pathfinder {
             if (from.floor - candidate.floor > settings.pathMaxDrop() + 1.0e-6) {
                 return null;
             }
+            if (candidate.floor < from.floor - 1.0e-6 && !columnClear(x, z, from.floor)) {
+                return null;
+            }
             return candidate;
         }
         return null;
+    }
+
+    private boolean columnClear(int x, int z, double floor) {
+        int minY = (int) Math.floor(floor);
+        int maxY = (int) Math.floor(floor + SNEAK_HEIGHT - 1.0e-6);
+        for (int y = minY; y <= maxY; y++) {
+            Block block = world.getBlockAt(x, y, z);
+            if (block.isLiquid()) {
+                return false;
+            }
+            if (!block.isPassable() && collisionBottom(block, y) < floor + SNEAK_HEIGHT - 1.0e-6) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean clearAbove(Node node) {

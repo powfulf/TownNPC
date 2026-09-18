@@ -4,6 +4,7 @@ import id.gaffa.townnpc.Settings;
 import id.gaffa.townnpc.TownNpcPlugin;
 import id.gaffa.townnpc.npc.Npc;
 import id.gaffa.townnpc.npc.NpcManager;
+import id.gaffa.townnpc.npc.Pathfinder;
 import id.gaffa.townnpc.path.Waypoint;
 import id.gaffa.townnpc.skin.SkinData;
 import net.kyori.adventure.text.Component;
@@ -25,7 +26,7 @@ import java.util.Optional;
 
 public final class TownNpcCommand implements TabExecutor {
     private static final List<String> ROOT = List.of("create", "remove", "list", "info", "tp", "skin",
-            "speed", "look", "path", "pause", "resume", "reload");
+            "speed", "look", "path", "pause", "resume", "route", "reload");
     private static final List<String> PATH_SUB = List.of("add", "insert", "set", "move", "remove", "list", "clear", "show");
     private static final int SHOW_SECONDS = 15;
     private static final int SHOW_MAX_POINTS = 2000;
@@ -57,6 +58,7 @@ public final class TownNpcCommand implements TabExecutor {
             case "pause" -> setPaused(sender, args, true);
             case "resume" -> setPaused(sender, args, false);
             case "reload" -> reload(sender);
+            case "route" -> route(sender, args);
             default -> help(sender, label);
         }
         return true;
@@ -77,6 +79,7 @@ public final class TownNpcCommand implements TabExecutor {
         info(sender, c + "path <name> set <index> jump|sneak <true|false> | wait <seconds>");
         info(sender, c + "path <name> move <index> [at x y z]  - move a waypoint to your position");
         info(sender, c + "path <name> remove <index> | list | clear | show");
+        info(sender, c + "route <name>  - print the planned route to the next waypoint");
         info(sender, c + "reload");
     }
 
@@ -137,7 +140,7 @@ public final class TownNpcCommand implements TabExecutor {
         info(sender, "  skin: " + (npc.skin() == null ? "none" : npc.skinSource()));
         info(sender, "  waypoints: " + npc.waypoints().size() + "   next: #" + npc.nextWaypoint()
                 + "   viewers: " + npc.viewerCount());
-        info(sender, "  state: " + (npc.airborne() ? "airborne " : "") + (npc.sneaking() ? "sneaking " : "")
+        info(sender, "  state: route " + npc.routeState() + " " + (npc.airborne() ? "airborne " : "") + (npc.sneaking() ? "sneaking " : "")
                 + (npc.waitTicks() > 0 ? "waiting " + npc.waitTicks() + "t" : "") + (npc.paused() ? "paused" : ""));
     }
 
@@ -255,6 +258,32 @@ public final class TownNpcCommand implements TabExecutor {
         }
         npcs.edit(npc, () -> npc.setPaused(paused));
         success(sender, npc.name() + (paused ? " paused." : " resumed."));
+    }
+
+    private void route(CommandSender sender, String[] args) {
+        Npc npc = requireNpc(sender, args, "route <name>");
+        if (npc == null) {
+            return;
+        }
+        World world = Bukkit.getWorld(npc.worldName());
+        if (world == null) {
+            error(sender, "World " + npc.worldName() + " is not loaded.");
+            return;
+        }
+        Waypoint target = npc.waypoints().get(npc.nextWaypoint());
+        long started = System.nanoTime();
+        List<double[]> route = new Pathfinder(npcs.settings(), world)
+                .find(npc.x(), npc.y(), npc.z(), target.x(), target.y(), target.z());
+        long micros = (System.nanoTime() - started) / 1000;
+        if (route == null) {
+            info(sender, "No route from the current position to waypoint #" + npc.nextWaypoint()
+                    + " (" + micros + " us). The NPC will walk in a straight line.");
+            return;
+        }
+        info(sender, "Route to waypoint #" + npc.nextWaypoint() + ": " + route.size() + " steps, planned in " + micros + " us");
+        for (double[] point : route) {
+            info(sender, "  " + fmt(point[0]) + ", " + fmt(point[1]) + ", " + fmt(point[2]));
+        }
     }
 
     private void reload(CommandSender sender) {

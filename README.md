@@ -83,7 +83,8 @@ Use `/tnpc path guard show` to preview the route with particles.
 - Add waypoints while standing on the ground. The NPC follows the terrain under it; the waypoint height is only used as a fallback.
 - The route between two waypoints is planned automatically, including the way back from the last waypoint to the first one. Walls are avoided and floors are changed through stairs, slabs or one-block jumps. If no route exists within `pathfinding.max-distance` and `pathfinding.max-nodes`, the NPC walks in a straight line instead.
 - Routes are recomputed at most once per minute per segment, so give the NPC a moment after changing the terrain, or run `/tnpc reload`.
-- `/tnpc path <name> show` draws the planned routes once the NPC has walked them.
+- `/tnpc path <name> show` draws the planned routes once the NPC has walked them. `/tnpc route <name>` prints the next route as text.
+- NPCs need the same clearance as a player: two blocks of headroom, or one and a half while sneaking. Staircases between floors work as long as a player can walk them.
 - By default an NPC stands still while no player is within `view-distance`. Set `simulate-without-viewers: true` if the route must keep running regardless.
 
 ## Commands
@@ -112,6 +113,7 @@ All commands require the `townnpc.admin` permission (granted to operators by def
 | `/tnpc path <name> list` | List waypoints with their index and options |
 | `/tnpc path <name> clear` | Delete every waypoint except the first |
 | `/tnpc path <name> show` | Show the route with particles for 15 seconds |
+| `/tnpc route <name>` | Print the planned route from the NPC's current position to its next waypoint |
 | `/tnpc reload` | Reload `config.yml` and `npcs.yml` |
 
 ## Configuration
