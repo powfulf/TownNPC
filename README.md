@@ -21,7 +21,8 @@ TownNPC is a Paper plugin that adds player-like NPCs which patrol a looped path 
 ## Features
 
 - Looped waypoint paths, one path per NPC, any number of NPCs
-- Straight-line walking with ground snapping: stairs, slabs and carpets are climbed without extra setup
+- A* route planning between waypoints: NPCs walk around walls and use stairs, slabs and one-block jumps to reach a different floor
+- Ground snapping while walking: stairs, slabs and carpets are climbed without extra setup
 - Automatic jumping over one-block obstacles and automatic crouching under low ceilings
 - Per-waypoint actions: `jump`, `sneak` until the next waypoint, and `wait` for a number of seconds
 - Head tracking of the nearest player in front of the NPC, toggleable per NPC
@@ -80,8 +81,9 @@ Use `/tnpc path guard show` to preview the route with particles.
 ### Tips
 
 - Add waypoints while standing on the ground. The NPC follows the terrain under it; the waypoint height is only used as a fallback.
-- NPCs walk in a straight line between waypoints and do not avoid walls. Add more waypoints around corners.
-- Obstacles up to one block high are jumped over. Use stairs, slabs or a `jump` waypoint for anything else.
+- The route between two waypoints is planned automatically, including the way back from the last waypoint to the first one. Walls are avoided and floors are changed through stairs, slabs or one-block jumps. If no route exists within `pathfinding.max-distance` and `pathfinding.max-nodes`, the NPC walks in a straight line instead.
+- Routes are recomputed at most once per minute per segment, so give the NPC a moment after changing the terrain, or run `/tnpc reload`.
+- `/tnpc path <name> show` draws the planned routes once the NPC has walked them.
 - By default an NPC stands still while no player is within `view-distance`. Set `simulate-without-viewers: true` if the route must keep running regardless.
 
 ## Commands
@@ -132,14 +134,20 @@ All commands require the `townnpc.admin` permission (granted to operators by def
 | `skin.cache-days` | `7` | How long fetched skins are cached |
 | `limits.max-npcs` | `100` | Maximum number of NPCs |
 | `limits.max-waypoints` | `500` | Maximum waypoints per NPC |
+| `pathfinding.enabled` | `true` | Plan routes around obstacles between waypoints |
+| `pathfinding.max-nodes` | `4000` | Search budget per route |
+| `pathfinding.max-distance` | `96` | Waypoints farther apart than this are connected by a straight line |
+| `pathfinding.max-drop` | `3` | Highest drop the NPC will walk off while following a route |
 
 NPC definitions are stored in `plugins/townnpc/npcs.yml`. The file can be edited by hand; run `/tnpc reload` afterwards.
 
 ## Performance
 
-A single task ticks every NPC. Each moving NPC reads about a dozen blocks per tick, only from chunks that are already loaded, and sends one relative movement packet per viewer. Head rotation and pose packets are sent only when they change. NPCs without viewers or in unloaded chunks are skipped entirely.
+Each moving NPC reads about a dozen blocks per tick, only from chunks that are already loaded, and sends one relative movement packet per viewer. Head rotation and pose packets are sent only when they change. NPCs without viewers or in unloaded chunks are skipped entirely.
 
-In a local test, 60 NPCs walking at the same time added roughly 0.5 ms per server tick.
+Route planning runs once when an NPC leaves a waypoint and the result is cached for a minute. A search is capped by `pathfinding.max-nodes`, so a single plan stays in the low milliseconds even when no route exists.
+
+In a local test, 50 NPCs walking planned routes around obstacles at the same time added roughly 0.5 ms per server tick.
 
 On Folia, every NPC schedules its own tick on the region that owns its current chunk, so NPCs in different regions are processed in parallel and never touch a chunk from the wrong thread. An NPC with no viewers drops to a light global check every `viewer-check-interval` ticks after five seconds and resumes region ticking as soon as a player comes within `view-distance`.
 

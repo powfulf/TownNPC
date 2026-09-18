@@ -6,6 +6,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.util.BoundingBox;
 
+import java.util.ArrayList;
 import java.util.List;
 
 final class Mover {
@@ -18,6 +19,7 @@ final class Mover {
     private static final double MAX_FALL_PER_TICK = 3.92;
     private static final double RECOVERY_DISTANCE = 4.0;
     private static final double EPSILON = 1.0e-4;
+    private static final long ROUTE_CACHE_MILLIS = 60_000L;
 
     private final Settings settings;
 
@@ -40,8 +42,16 @@ final class Mover {
         }
 
         Waypoint target = path.get(npc.nextWaypoint);
-        double dx = target.x() - npc.x;
-        double dz = target.z() - npc.z;
+        if (npc.route == null) {
+            if (!isLoaded(world, npc.x, npc.z)) {
+                return false;
+            }
+            planRoute(npc, world, target);
+        }
+        double[] point = npc.route.get(npc.routeIndex);
+        boolean lastPoint = npc.routeIndex == npc.route.size() - 1;
+        double dx = point[0] - npc.x;
+        double dz = point[2] - npc.z;
         double distance = Math.sqrt(dx * dx + dz * dz);
 
         double step = npc.speed() / 20.0;
@@ -53,8 +63,8 @@ final class Mover {
         double nz;
         boolean arrived = false;
         if (distance <= step) {
-            nx = target.x();
-            nz = target.z();
+            nx = point[0];
+            nz = point[2];
             arrived = true;
         } else {
             nx = npc.x + dx / distance * step;
@@ -125,9 +135,43 @@ final class Mover {
         }
 
         if (arrived) {
-            arrive(npc, target, path.size());
+            if (lastPoint) {
+                npc.route = null;
+                npc.routeIndex = 0;
+                arrive(npc, target, path.size());
+            } else {
+                npc.routeIndex++;
+            }
         }
         return true;
+    }
+
+    private void planRoute(Npc npc, World world, Waypoint target) {
+        List<double[]> points = null;
+        if (settings.pathEnabled()) {
+            int segment = npc.nextWaypoint;
+            Npc.CachedRoute cached = npc.routeCache.get(segment);
+            long now = System.currentTimeMillis();
+            if (cached != null && now - cached.computedAt() < ROUTE_CACHE_MILLIS) {
+                points = cached.points();
+            } else {
+                List<double[]> found = new Pathfinder(settings, world)
+                        .find(npc.x, npc.y, npc.z, target.x(), target.y(), target.z());
+                if (found != null) {
+                    points = new ArrayList<>(Math.max(1, found.size()));
+                    for (int i = 1; i < found.size() - 1; i++) {
+                        points.add(found.get(i));
+                    }
+                    points.add(new double[]{target.x(), target.y(), target.z()});
+                    npc.routeCache.put(segment, new Npc.CachedRoute(points, now));
+                }
+            }
+        }
+        if (points == null) {
+            points = List.of(new double[]{target.x(), target.y(), target.z()});
+        }
+        npc.route = points;
+        npc.routeIndex = 0;
     }
 
     private void arrive(Npc npc, Waypoint target, int pathSize) {

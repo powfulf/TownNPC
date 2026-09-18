@@ -7,14 +7,19 @@ import net.minecraft.network.protocol.Packet;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
 public final class Npc {
     public static final Pattern NAME = Pattern.compile("^[A-Za-z0-9_]{1,16}$");
+
+    record CachedRoute(List<double[]> points, long computedAt) {
+    }
 
     private final String name;
     private final UUID uuid;
@@ -48,6 +53,9 @@ public final class Npc {
     boolean pendingJump;
     int waitTicks;
     float waitPitch;
+    List<double[]> route;
+    int routeIndex;
+    final Map<Integer, CachedRoute> routeCache = new HashMap<>();
     int nextWaypoint;
     long lastFeetBlock = Long.MIN_VALUE;
     long sentX;
@@ -191,6 +199,14 @@ public final class Npc {
         lowCeiling = false;
         waitTicks = 0;
         lastFeetBlock = Long.MIN_VALUE;
+        route = null;
+        routeIndex = 0;
+        routeCache.clear();
         nextWaypoint = waypoints.size() > 1 ? (index + 1) % waypoints.size() : 0;
+    }
+
+    public List<double[]> cachedRoute(int segment) {
+        CachedRoute cached = routeCache.get(segment);
+        return cached == null ? null : cached.points();
     }
 }

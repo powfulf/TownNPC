@@ -16,7 +16,11 @@ public record Settings(
         int skinTimeoutSeconds,
         long skinCacheMillis,
         int maxNpcs,
-        int maxWaypoints) {
+        int maxWaypoints,
+        boolean pathEnabled,
+        int pathMaxNodes,
+        double pathMaxDistance,
+        int pathMaxDrop) {
     public static final double MIN_SPEED = 0.1;
     public static final double MAX_SPEED = 10.0;
 
@@ -35,7 +39,11 @@ public record Settings(
                 (int) clamp(config.getInt("skin.timeout-seconds", 5), 1, 30),
                 (long) (clamp(config.getDouble("skin.cache-days", 7), 0.01, 365) * 86_400_000L),
                 (int) clamp(config.getInt("limits.max-npcs", 100), 1, 1000),
-                (int) clamp(config.getInt("limits.max-waypoints", 500), 2, 5000));
+                (int) clamp(config.getInt("limits.max-waypoints", 500), 2, 5000),
+                config.getBoolean("pathfinding.enabled", true),
+                (int) clamp(config.getInt("pathfinding.max-nodes", 4000), 100, 50000),
+                clamp(config.getDouble("pathfinding.max-distance", 96), 8, 512),
+                (int) clamp(config.getInt("pathfinding.max-drop", 3), 0, 16));
     }
 
     public double viewDistanceSquared() {

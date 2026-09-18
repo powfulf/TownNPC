@@ -424,14 +424,27 @@ public final class TownNpcCommand implements TabExecutor {
         List<Location> points = new ArrayList<>();
         for (int i = 0; i < path.size() && points.size() < SHOW_MAX_POINTS; i++) {
             Waypoint a = path.get(i);
-            Waypoint b = path.get((i + 1) % path.size());
-            double dx = b.x() - a.x();
-            double dy = b.y() - a.y();
-            double dz = b.z() - a.z();
-            int steps = Math.max(1, (int) Math.ceil(Math.sqrt(dx * dx + dy * dy + dz * dz) / 0.5));
-            for (int s = 0; s < steps && points.size() < SHOW_MAX_POINTS; s++) {
-                double t = (double) s / steps;
-                points.add(new Location(world, a.x() + dx * t, a.y() + dy * t + 0.1, a.z() + dz * t));
+            int next = (i + 1) % path.size();
+            Waypoint b = path.get(next);
+            List<double[]> route = npc.cachedRoute(next);
+            List<double[]> line = new ArrayList<>();
+            line.add(new double[]{a.x(), a.y(), a.z()});
+            if (route != null) {
+                line.addAll(route);
+            } else {
+                line.add(new double[]{b.x(), b.y(), b.z()});
+            }
+            for (int p = 0; p + 1 < line.size() && points.size() < SHOW_MAX_POINTS; p++) {
+                double[] from = line.get(p);
+                double[] to = line.get(p + 1);
+                double dx = to[0] - from[0];
+                double dy = to[1] - from[1];
+                double dz = to[2] - from[2];
+                int steps = Math.max(1, (int) Math.ceil(Math.sqrt(dx * dx + dy * dy + dz * dz) / 0.5));
+                for (int s = 0; s < steps && points.size() < SHOW_MAX_POINTS; s++) {
+                    double t = (double) s / steps;
+                    points.add(new Location(world, from[0] + dx * t, from[1] + dy * t + 0.1, from[2] + dz * t));
+                }
             }
         }
         Particle.DustOptions segment = new Particle.DustOptions(Color.AQUA, 0.8f);

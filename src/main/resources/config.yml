@@ -34,3 +34,14 @@ skin:
 limits:
   max-npcs: 100
   max-waypoints: 500
+
+pathfinding:
+  # Plan a walkable route between waypoints instead of walking in a straight line.
+  # Routes go around walls and use stairs, slabs and one-block jumps to change floors.
+  enabled: true
+  # Search budget per route. Higher values find longer detours at a higher CPU cost.
+  max-nodes: 4000
+  # Waypoints farther apart than this (blocks) are connected by a straight line.
+  max-distance: 96
+  # Highest drop (blocks) the NPC will walk off while following a route.
+  max-drop: 3
